@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime, time
+from datetime import UTC, datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -14,6 +14,7 @@ from astro_api.schemas import (
     Angles,
     Aspect,
     AspectType,
+    CrossAspect,
     Dignity,
     House,
     HouseSystem,
@@ -24,10 +25,21 @@ from astro_api.schemas import (
     Points,
     ResolvedSubject,
     SignName,
+    SkyResponse,
     Subject,
+    Synastry,
+    SynastryResponse,
+    TransitsResponse,
 )
 
-__all__ = ["DateOutOfRange", "ResolvedLocation", "build_natal"]
+__all__ = [
+    "DateOutOfRange",
+    "ResolvedLocation",
+    "build_natal",
+    "build_sky",
+    "build_synastry",
+    "build_transits",
+]
 
 
 @dataclass(frozen=True)
@@ -203,6 +215,65 @@ def _extract_aspects(natal: Any) -> list[Aspect]:
     return out
 
 
+def _extract_planet_to_planet_aspects(chart_with_aspects_to: Any) -> list[Aspect]:
+    """Extract cross-chart planet→planet aspects (5 majors only).
+
+    Used for the transits block: the chart was built with ``aspects_to=natal``,
+    so each entry's active is in this chart, passive is in the natal chart.
+    Spec §5.3: "aspects from the current sky's planets to the natal planets".
+    """
+    out: list[Aspect] = []
+    for active_idx, pairs in chart_with_aspects_to.aspects.items():
+        if active_idx not in _PLANET_KEYS:
+            continue
+        for passive_idx, asp in pairs.items():
+            if passive_idx not in _PLANET_KEYS:
+                continue
+            if asp.type not in _ASPECT_TYPE_BY_NAME:
+                continue
+            out.append(
+                Aspect.model_validate(
+                    {
+                        "from": _PLANET_KEYS[active_idx],
+                        "to": _PLANET_KEYS[passive_idx],
+                        "type": _ASPECT_TYPE_BY_NAME[asp.type].value,
+                        "orb": float(asp.orb),
+                        "applying": bool(asp.movement.applicative),
+                    }
+                )
+            )
+    out.sort(key=lambda a: a.orb)
+    return out
+
+
+def _extract_cross_aspects(chart_with_aspects_to: Any) -> list[CrossAspect]:
+    """Extract A→B cross-aspects from a chart built with ``aspects_to=other``.
+
+    Active body is in chart A (this chart), passive body is in chart B.
+    Used for synastry. 5 majors only, sorted by orb ascending.
+    """
+    out: list[CrossAspect] = []
+    for active_idx, pairs in chart_with_aspects_to.aspects.items():
+        if active_idx not in _BODY_KEYS:
+            continue
+        for passive_idx, asp in pairs.items():
+            if passive_idx not in _BODY_KEYS:
+                continue
+            if asp.type not in _ASPECT_TYPE_BY_NAME:
+                continue
+            out.append(
+                CrossAspect(
+                    from_a=_BODY_KEYS[active_idx],
+                    to_b=_BODY_KEYS[passive_idx],
+                    type=_ASPECT_TYPE_BY_NAME[asp.type],
+                    orb=float(asp.orb),
+                    applying=bool(asp.movement.applicative),
+                )
+            )
+    out.sort(key=lambda a: a.orb)
+    return out
+
+
 def _local_naive_string(birth_date: Any, birth_time: time | None) -> str:
     t = birth_time if birth_time is not None else time(12, 0)
     return datetime.combine(birth_date, t).strftime("%Y-%m-%d %H:%M:%S")
@@ -217,38 +288,49 @@ def _utc_datetime(birth_date: Any, birth_time: time | None, tz_name: str) -> dat
     return datetime.combine(birth_date, t, tzinfo=tz).astimezone(ZoneInfo("UTC"))
 
 
-def build_natal(
+def _build_immanuel_natal(
     subject: Subject,
     location: ResolvedLocation,
-    house_system: HouseSystem,
-) -> NatalResponse:
-    """Compute a natal chart for the given subject and location.
+    *,
+    aspects_to: Any | None = None,
+) -> Any:
+    """Build an Immanuel Natal chart for ``subject`` at ``location``.
 
-    Pure function: no env access, no I/O beyond the in-process Swiss Ephemeris.
-    Caller is responsible for geocoding `subject.birth_place` into `location` and
-    for surfacing geocoding warnings (e.g. ``multiple_matches``).
+    Settings (house system, aspects, objects) must already be configured by the caller.
+    Out-of-range birth dates are translated to ``DateOutOfRange``.
     """
-    _configure_immanuel(house_system)
-    birth_time_unknown = subject.birth_time is None
-
     immanuel_subject = immanuel_charts.Subject(
         date_time=_local_naive_string(subject.birth_date, subject.birth_time),
         latitude=location.latitude,
         longitude=location.longitude,
         timezone=location.timezone,
     )
-
     try:
-        natal = immanuel_charts.Natal(immanuel_subject)
-        # Touch every object so an out-of-range error surfaces here, not later.
+        chart = immanuel_charts.Natal(immanuel_subject, aspects_to=aspects_to)
+        # Touch every object so out-of-range errors surface here, not later.
         for idx in (*_PLANET_KEYS, *_POINT_KEYS, *_ANGLE_KEYS):
-            _ = natal.objects[idx].sign.name
+            _ = chart.objects[idx].sign.name
     except swe.Error as e:
         raise DateOutOfRange(str(e)) from e
+    return chart
+
+
+def _natal_response(
+    chart: Any,
+    *,
+    subject: Subject,
+    location: ResolvedLocation,
+    house_system: HouseSystem,
+) -> NatalResponse:
+    """Project an Immanuel chart + inputs into our NatalResponse Pydantic model.
+
+    The chart's ``aspects`` (if any) are used as natal-to-natal aspects.
+    """
+    birth_time_unknown = subject.birth_time is None
 
     planets = Planets(
         **{
-            key: _planet_placement(natal.objects[idx], include_house=not birth_time_unknown)
+            key: _planet_placement(chart.objects[idx], include_house=not birth_time_unknown)
             for idx, key in _PLANET_KEYS.items()
         }
     )
@@ -259,7 +341,7 @@ def build_natal(
             points_kwargs[key] = None
         else:
             points_kwargs[key] = _point_placement(
-                natal.objects[idx], include_house=not birth_time_unknown
+                chart.objects[idx], include_house=not birth_time_unknown
             )
     points = Points(**points_kwargs)
 
@@ -267,7 +349,7 @@ def build_natal(
         angles: Angles | None = None
         houses: list[House] | None = None
     else:
-        angles = Angles(**{key: _angle(natal.objects[idx]) for idx, key in _ANGLE_KEYS.items()})
+        angles = Angles(**{key: _angle(chart.objects[idx]) for idx, key in _ANGLE_KEYS.items()})
         houses = sorted(
             (
                 House(
@@ -275,12 +357,10 @@ def build_natal(
                     sign=_sign(h.sign.name),
                     cusp_degree=float(h.sign_longitude.raw),
                 )
-                for h in natal.houses.values()
+                for h in chart.houses.values()
             ),
             key=lambda h: h.number,
         )
-
-    aspects = _extract_aspects(natal)
 
     warnings: list[str] = []
     if birth_time_unknown:
@@ -299,6 +379,165 @@ def build_natal(
         points=points,
         angles=angles,
         houses=houses,
-        aspects=aspects,
+        aspects=_extract_aspects(chart),
         warnings=warnings,
+    )
+
+
+def _coerce_utc(dt: datetime | None) -> datetime:
+    """Default to ``now`` and force UTC; naive input is treated as already-UTC."""
+    if dt is None:
+        return datetime.now(UTC)
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
+def build_natal(
+    subject: Subject,
+    location: ResolvedLocation,
+    house_system: HouseSystem,
+) -> NatalResponse:
+    """Compute a natal chart for the given subject and location.
+
+    Pure function: no env access, no I/O beyond the in-process Swiss Ephemeris.
+    Caller is responsible for geocoding ``subject.birth_place`` into ``location``
+    and for surfacing geocoding warnings (e.g. ``multiple_matches``).
+    """
+    _configure_immanuel(house_system)
+    chart = _build_immanuel_natal(subject, location)
+    return _natal_response(chart, subject=subject, location=location, house_system=house_system)
+
+
+def build_transits(
+    natal_subject: Subject,
+    location: ResolvedLocation,
+    house_system: HouseSystem,
+    target_date: datetime | None = None,
+) -> TransitsResponse:
+    """Compute transits to a natal chart at ``target_date`` (UTC; default = now).
+
+    Returns the natal envelope plus a ``transits`` block — aspects from the
+    target-sky planets to the natal planets, sorted by orb ascending.
+    """
+    _configure_immanuel(house_system)
+    target_utc = _coerce_utc(target_date)
+
+    natal_chart = _build_immanuel_natal(natal_subject, location)
+    natal_envelope = _natal_response(
+        natal_chart, subject=natal_subject, location=location, house_system=house_system
+    )
+
+    # Build the transit chart at target_utc with the natal location, hooked up to
+    # the natal chart so its `aspects` dict contains transit→natal cross-aspects.
+    transit_immanuel = immanuel_charts.Subject(
+        date_time=target_utc.strftime("%Y-%m-%d %H:%M:%S"),
+        latitude=location.latitude,
+        longitude=location.longitude,
+        timezone="UTC",
+    )
+    try:
+        transit_chart = immanuel_charts.Natal(transit_immanuel, aspects_to=natal_chart)
+        for idx in _PLANET_KEYS:
+            _ = transit_chart.objects[idx].sign.name
+    except swe.Error as e:
+        raise DateOutOfRange(str(e)) from e
+
+    transits = _extract_planet_to_planet_aspects(transit_chart)
+
+    return TransitsResponse(
+        subject=natal_envelope.subject,
+        house_system=natal_envelope.house_system,
+        planets=natal_envelope.planets,
+        points=natal_envelope.points,
+        angles=natal_envelope.angles,
+        houses=natal_envelope.houses,
+        aspects=natal_envelope.aspects,
+        transits=transits,
+        warnings=natal_envelope.warnings,
+    )
+
+
+def build_synastry(
+    subject_a: Subject,
+    location_a: ResolvedLocation,
+    subject_b: Subject,
+    location_b: ResolvedLocation,
+    house_system: HouseSystem,
+) -> SynastryResponse:
+    """Compare two natal charts. Returns each chart in full plus A→B cross-aspects.
+
+    Per spec §5.4: ``cross_aspects`` only — no ``highlights`` field. The LLM
+    client formats human-readable summaries; the API returns structured data.
+    """
+    _configure_immanuel(house_system)
+
+    chart_a = _build_immanuel_natal(subject_a, location_a)
+    chart_b = _build_immanuel_natal(subject_b, location_b)
+    response_a = _natal_response(
+        chart_a, subject=subject_a, location=location_a, house_system=house_system
+    )
+    response_b = _natal_response(
+        chart_b, subject=subject_b, location=location_b, house_system=house_system
+    )
+
+    # Re-build chart A with aspects_to=chart_b so its `aspects` dict holds A→B
+    # cross-aspects (active in A, passive in B). The earlier chart_a is reused
+    # for response_a; this one is purely for cross-aspect extraction.
+    cross_chart = _build_immanuel_natal(subject_a, location_a, aspects_to=chart_b)
+    cross_aspects = _extract_cross_aspects(cross_chart)
+
+    return SynastryResponse(
+        subject_a=response_a,
+        subject_b=response_b,
+        synastry=Synastry(cross_aspects=cross_aspects),
+        warnings=[],
+    )
+
+
+def build_sky(date_time: datetime | None = None) -> SkyResponse:
+    """Current planetary positions at ``date_time`` (UTC; default = now).
+
+    No location → no houses, no angles, no part-of-fortune. Vertex is also
+    location-dependent and is omitted by setting it from a Greenwich default
+    that the LLM client should treat as approximate (planets/points are
+    location-independent and authoritative).
+    """
+    # House system doesn't matter for sky (we don't expose houses), but Immanuel
+    # still needs one set; default to placidus.
+    _configure_immanuel(HouseSystem.PLACIDUS)
+    dt_utc = _coerce_utc(date_time)
+
+    sky_subject = immanuel_charts.Subject(
+        date_time=dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
+        latitude=0.0,
+        longitude=0.0,
+        timezone="UTC",
+    )
+    try:
+        chart = immanuel_charts.Natal(sky_subject)
+        for idx in (*_PLANET_KEYS, *_POINT_KEYS):
+            _ = chart.objects[idx].sign.name
+    except swe.Error as e:
+        raise DateOutOfRange(str(e)) from e
+
+    planets = Planets(
+        **{
+            key: _planet_placement(chart.objects[idx], include_house=False)
+            for idx, key in _PLANET_KEYS.items()
+        }
+    )
+    points = Points(
+        **{
+            key: _point_placement(chart.objects[idx], include_house=False)
+            for idx, key in _POINT_KEYS.items()
+        }
+    )
+
+    return SkyResponse(
+        datetime_utc=dt_utc,
+        planets=planets,
+        points=points,
+        angles=None,
+        warnings=[],
     )
