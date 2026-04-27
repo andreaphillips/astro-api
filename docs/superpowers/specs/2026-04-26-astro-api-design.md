@@ -114,9 +114,12 @@ Allowed `house_system`: `placidus`, `whole_sign`, `koch`, `equal`.
     // uranus, neptune, pluto, chiron
   },
   "points": {
-    // Each point uses the shape: { "sign": <string>, "degree": <float>, "house": <int> }
-    "north_node":      { },
-    "south_node":      { },
+    // Each point uses the shape:
+    //   { "sign": <string>, "degree": <float>, "house": <int>, "retrograde": <bool|null> }
+    // `retrograde` is null for points where direction is not a meaningful
+    // concept (vertex, part_of_fortune).
+    "north_node":      { },   // true node
+    "south_node":      { },   // true node
     "lilith":          { },   // Black Moon Lilith (mean)
     "vertex":          { },
     "part_of_fortune": { }
@@ -144,6 +147,7 @@ Allowed `house_system`: `placidus`, `whole_sign`, `koch`, `equal`.
 - `dignity`: one of `domicile`, `exaltation`, `detriment`, `fall`, `peregrine`, `neutral`. Comes from Immanuel.
 - `weight`: essential dignity score from Immanuel (numeric, scale defined by Immanuel docs). Higher = stronger placement. Useful for highlighting "loud" planets.
 - `applying`: `true` if the aspect is forming (planets moving toward exact), `false` if separating.
+- Nodes are computed as **true nodes** (not mean) so `points.north_node.retrograde` and `points.south_node.retrograde` carry real information — true nodes can briefly turn direct, mean nodes are always retrograde by construction.
 - `orb`: absolute degrees of separation from exact aspect.
 - Sign names, aspect names, and dignity labels are returned in English (`taurus`, `leo`, `trine`, `square`, `domicile`, etc.) per the `DEFAULT_LOCALE=en_US` setting.
 - `warnings` is always present, possibly empty. Known warning codes: `multiple_matches` (geocoding ambiguity), `birth_time_unknown` (no `birth_time` provided; chart computed at noon local time with `houses`, `angles`, and `points.part_of_fortune` set to `null`).

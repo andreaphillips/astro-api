@@ -77,8 +77,11 @@ _PLANET_KEYS: dict[int, str] = {
 }
 
 _POINT_KEYS: dict[int, str] = {
-    immanuel_chart.NORTH_NODE: "north_node",
-    immanuel_chart.SOUTH_NODE: "south_node",
+    # True nodes (vs mean) so the retrograde flag carries real information —
+    # mean nodes are mathematically always retrograde, true nodes can briefly
+    # turn direct.
+    immanuel_chart.TRUE_NORTH_NODE: "north_node",
+    immanuel_chart.TRUE_SOUTH_NODE: "south_node",
     immanuel_chart.LILITH: "lilith",  # Black Moon Lilith (mean) per spec §5.2
     immanuel_chart.VERTEX: "vertex",
     immanuel_chart.PART_OF_FORTUNE: "part_of_fortune",
@@ -128,8 +131,8 @@ def _configure_immanuel(house_system: HouseSystem) -> None:
         immanuel_chart.DESC,
         immanuel_chart.MC,
         immanuel_chart.IC,
-        immanuel_chart.NORTH_NODE,
-        immanuel_chart.SOUTH_NODE,
+        immanuel_chart.TRUE_NORTH_NODE,
+        immanuel_chart.TRUE_SOUTH_NODE,
         immanuel_chart.VERTEX,
         immanuel_chart.PART_OF_FORTUNE,
         immanuel_chart.LILITH,
@@ -180,10 +183,20 @@ def _planet_placement(obj: Any, *, include_house: bool) -> PlanetPlacement:
 
 
 def _point_placement(obj: Any, *, include_house: bool) -> PointPlacement:
+    # Vertex and Part of Fortune are calculated points, not bodies in motion —
+    # `movement` is absent or non-meaningful for them. Surface retrograde only
+    # when Immanuel reports it (true nodes, Lilith).
+    movement = getattr(obj, "movement", None)
+    retrograde: bool | None = None
+    if movement is not None:
+        rx_attr = getattr(movement, "retrograde", None)
+        if rx_attr is not None:
+            retrograde = bool(rx_attr)
     return PointPlacement(
         sign=_sign(obj.sign.name),
         degree=float(obj.sign_longitude.raw),
         house=obj.house.number if include_house else None,
+        retrograde=retrograde,
     )
 
 

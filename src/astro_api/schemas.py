@@ -108,6 +108,7 @@ class PointPlacement(_StrictModel):
     sign: SignName
     degree: float
     house: int | None = None
+    retrograde: bool | None = None
 
 
 class Angle(_StrictModel):
