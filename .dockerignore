@@ -1,0 +1,36 @@
+# Keep the build context small and reproducible.
+.git
+.gitignore
+.dockerignore
+
+# Local dev artifacts
+.venv
+.pytest_cache
+.ruff_cache
+.coverage
+.coverage.*
+htmlcov
+
+# Python bytecode
+__pycache__
+*.py[cod]
+*$py.class
+
+# Environment + secrets — never bake into the image
+.env
+.env.local
+.env.*.local
+
+# Editor / OS
+.vscode
+.idea
+*.swp
+.DS_Store
+
+# Docs / planning / agent workspaces — not needed at runtime
+docs
+.claude
+.taskhive
+tests
+Dockerfile
+railway.json

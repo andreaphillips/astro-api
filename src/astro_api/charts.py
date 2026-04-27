@@ -115,6 +115,12 @@ def _configure_immanuel(house_system: HouseSystem) -> None:
 
     Idempotent — safe to call before every chart build.
     """
+    # Reassert the Swiss Ephemeris file path on every build. immanuel.__init__
+    # sets it once at import time, but under uvicorn the swisseph C-library
+    # path can be lost between import and the first request, leading to
+    # "SwissEph file 'seas_18.se1' not found" on Chiron. Reasserting here is
+    # idempotent and cheap.
+    immanuel_settings.set_swe_filepath()
     immanuel_settings.house_system = _HOUSE_SYSTEM_CODES[house_system]
     immanuel_settings.aspects = list(_FIVE_MAJORS)
     immanuel_settings.objects = [
