@@ -1,0 +1,30 @@
+{
+  "diana_princess_of_wales": {
+    "source": "Astrodatabank, Rodden Rating AA. https://www.astro.com/astro-databank/Diana,_Princess_of_Wales",
+    "subject": {
+      "name": "Diana, Princess of Wales",
+      "birth_date": "1961-07-01",
+      "birth_time": "19:45",
+      "birth_place": "Sandringham, England"
+    },
+    "resolved_location": {
+      "latitude": 52.8333,
+      "longitude": 0.5,
+      "timezone": "Europe/London"
+    },
+    "house_system": "placidus",
+    "expected_planets": {
+      "sun":     { "sign": "cancer",      "degree": 9.66  },
+      "moon":    { "sign": "aquarius",    "degree": 25.04 },
+      "mercury": { "sign": "cancer",      "degree": 3.20  },
+      "venus":   { "sign": "taurus",      "degree": 24.40 },
+      "mars":    { "sign": "virgo",       "degree": 1.65  },
+      "jupiter": { "sign": "aquarius",    "degree": 5.10  },
+      "saturn":  { "sign": "capricorn",   "degree": 27.81 },
+      "uranus":  { "sign": "leo",         "degree": 23.34 },
+      "neptune": { "sign": "scorpio",     "degree": 8.64  },
+      "pluto":   { "sign": "virgo",       "degree": 6.04  },
+      "chiron":  { "sign": "pisces",      "degree": 6.47  }
+    }
+  }
+}
