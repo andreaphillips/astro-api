@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import time
 from datetime import datetime
@@ -37,7 +38,18 @@ API_DESCRIPTION = (
     "which auto-generates MCP tools from this OpenAPI spec."
 )
 
-app = FastAPI(title="astro-api", version="1.0.0", description=API_DESCRIPTION)
+_PUBLIC_BASE_URL = os.environ.get(
+    "PUBLIC_BASE_URL",
+    "https://astro-api-production-8a8b.up.railway.app",
+).rstrip("/")
+_SERVERS = [{"url": _PUBLIC_BASE_URL, "description": "Production"}]
+
+app = FastAPI(
+    title="astro-api",
+    version="1.0.0",
+    description=API_DESCRIPTION,
+    servers=_SERVERS,
+)
 
 _API_KEY_SCHEME_NAME = "ApiKeyAuth"
 _UNSECURED_PATHS = frozenset({"/healthz", "/openapi.json"})
@@ -227,6 +239,7 @@ def custom_openapi() -> dict[str, Any]:
         version=app.version,
         description=app.description,
         routes=app.routes,
+        servers=app.servers,
     )
     components = schema.setdefault("components", {})
     security_schemes = components.setdefault("securitySchemes", {})
