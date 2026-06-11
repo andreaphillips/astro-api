@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import UTC, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -18,14 +18,19 @@ from astro_api.schemas import (
     Dignity,
     House,
     HouseSystem,
+    NatalBlock,
     NatalResponse,
     PlanetPlacement,
     Planets,
     PointPlacement,
     Points,
+    ProgressedBlock,
+    ProgressionsResponse,
     ResolvedSubject,
+    ReturnMoment,
     SignName,
     SkyResponse,
+    SolarReturnResponse,
     Subject,
     Synastry,
     SynastryResponse,
@@ -33,10 +38,14 @@ from astro_api.schemas import (
 )
 
 __all__ = [
+    "BirthTimeRequiredForProgressions",
+    "BirthTimeRequiredForSolarReturn",
     "DateOutOfRange",
     "ResolvedLocation",
     "build_natal",
+    "build_progressions",
     "build_sky",
+    "build_solar_return",
     "build_synastry",
     "build_transits",
 ]
@@ -53,6 +62,22 @@ class ResolvedLocation:
 
 class DateOutOfRange(Exception):
     """Raised when the birth date falls outside the available ephemeris range."""
+
+
+class BirthTimeRequiredForSolarReturn(Exception):
+    """Raised when a solar-return request omits the required birth time.
+
+    Solar returns depend on the exact natal Sun degree, which needs an exact
+    birth time — there is no noon fallback (spec §2).
+    """
+
+
+class BirthTimeRequiredForProgressions(Exception):
+    """Raised when a progressions request omits the required birth time.
+
+    A progressed Moon at age ~35 with a noon fallback could be off by a full
+    sign, so progressions require an exact birth time — no noon fallback (§2).
+    """
 
 
 _HOUSE_SYSTEM_CODES: dict[HouseSystem, int] = {
@@ -558,5 +583,183 @@ def build_sky(date_time: datetime | None = None) -> SkyResponse:
         planets=planets,
         points=points,
         angles=None,
+        warnings=[],
+    )
+
+
+# ---------- Phase 2: Solar Return + Progressions ----------
+#
+# Both endpoints require a known birth time (spec §2), so charts always carry
+# houses, angles, and Part of Fortune — these projection helpers assume that.
+
+
+def _planets_block(chart: Any) -> Planets:
+    return Planets(
+        **{
+            key: _planet_placement(chart.objects[idx], include_house=True)
+            for idx, key in _PLANET_KEYS.items()
+        }
+    )
+
+
+def _points_block(chart: Any) -> Points:
+    return Points(
+        **{
+            key: _point_placement(chart.objects[idx], include_house=True)
+            for idx, key in _POINT_KEYS.items()
+        }
+    )
+
+
+def _angles_block(chart: Any) -> Angles:
+    return Angles(**{key: _angle(chart.objects[idx]) for idx, key in _ANGLE_KEYS.items()})
+
+
+def _houses_block(chart: Any) -> list[House]:
+    return sorted(
+        (
+            House(
+                number=h.number,
+                sign=_sign(h.sign.name),
+                cusp_degree=float(h.sign_longitude.raw),
+            )
+            for h in chart.houses.values()
+        ),
+        key=lambda h: h.number,
+    )
+
+
+def build_solar_return(
+    subject: Subject,
+    location: ResolvedLocation,
+    year: int,
+    relocation: ResolvedLocation | None,
+    house_system: HouseSystem,
+) -> SolarReturnResponse:
+    """Cast the solar return chart for ``subject`` in ``year``.
+
+    The return moment — the instant the transiting Sun reaches the natal Sun's
+    ecliptic longitude — depends only on the natal Sun and is location-
+    independent. The chart's houses/angles are cast at ``relocation`` when given
+    (the "travel for your solar return" technique), otherwise at the birthplace.
+
+    The relocated native keeps the birth timezone so the natal Julian date — and
+    therefore the natal Sun longitude that fixes the return moment — is unchanged;
+    only the coordinates move. Pure function: no env access, no I/O beyond the
+    in-process Swiss Ephemeris.
+    """
+    _configure_immanuel(house_system)
+
+    cast_location = relocation if relocation is not None else location
+
+    native = immanuel_charts.Subject(
+        date_time=_local_naive_string(subject.birth_date, subject.birth_time),
+        latitude=cast_location.latitude,
+        longitude=cast_location.longitude,
+        timezone=location.timezone,
+    )
+    try:
+        sr_chart = immanuel_charts.SolarReturn(native, year)
+        # Touch every object so out-of-range errors surface here, not later.
+        for idx in (*_PLANET_KEYS, *_POINT_KEYS, *_ANGLE_KEYS):
+            _ = sr_chart.objects[idx].sign.name
+    except swe.Error as e:
+        raise DateOutOfRange(str(e)) from e
+
+    return_moment_utc = sr_chart.solar_return_date_time.datetime.astimezone(UTC)
+
+    return SolarReturnResponse(
+        subject=ResolvedSubject(
+            name=subject.name,
+            datetime_utc=_utc_datetime(subject.birth_date, subject.birth_time, location.timezone),
+            latitude=location.latitude,
+            longitude=location.longitude,
+            timezone=location.timezone,
+        ),
+        return_moment=ReturnMoment(
+            datetime_utc=return_moment_utc,
+            latitude=cast_location.latitude,
+            longitude=cast_location.longitude,
+            timezone=cast_location.timezone,
+        ),
+        relocated=relocation is not None,
+        house_system=house_system,
+        planets=_planets_block(sr_chart),
+        points=_points_block(sr_chart),
+        angles=_angles_block(sr_chart),
+        houses=_houses_block(sr_chart),
+        aspects=_extract_aspects(sr_chart),
+        warnings=[],
+    )
+
+
+def build_progressions(
+    subject: Subject,
+    location: ResolvedLocation,
+    target_date: date | None,
+    house_system: HouseSystem,
+) -> ProgressionsResponse:
+    """Secondary progressions (day-for-a-year) to ``target_date``.
+
+    The progressed moment advances the natal moment by one ephemeris day per
+    year of life: ``progressed = birth + (target - birth) / year_length``. The
+    progressed chart is a chart cast at that instant at the *birth* location;
+    progressions don't move houses, so the natal houses are the reference frame
+    and the progressed block carries no houses. ``target_date`` defaults to today
+    (UTC) and is treated as UTC midnight.
+
+    Pure function: no env access, no I/O beyond the in-process Swiss Ephemeris.
+    """
+    _configure_immanuel(house_system)
+
+    birth_utc = _utc_datetime(subject.birth_date, subject.birth_time, location.timezone)
+    effective_target = target_date if target_date is not None else datetime.now(UTC).date()
+    target_utc = datetime.combine(effective_target, time(0, 0), tzinfo=UTC)
+    years = (target_utc - birth_utc) / timedelta(days=immanuel_calc.YEAR_DAYS)
+    progressed_utc = birth_utc + timedelta(days=years)
+
+    natal_chart = _build_immanuel_natal(subject, location)
+    natal_block = NatalBlock(
+        planets=_planets_block(natal_chart),
+        points=_points_block(natal_chart),
+        angles=_angles_block(natal_chart),
+        houses=_houses_block(natal_chart),
+    )
+
+    # Cast a chart at the progressed instant at the birth location, hooked up to
+    # the natal chart so its `aspects` dict holds progressed→natal cross-aspects.
+    progressed_immanuel = immanuel_charts.Subject(
+        date_time=progressed_utc.strftime("%Y-%m-%d %H:%M:%S"),
+        latitude=location.latitude,
+        longitude=location.longitude,
+        timezone="UTC",
+    )
+    try:
+        progressed_chart = immanuel_charts.Natal(progressed_immanuel, aspects_to=natal_chart)
+        for idx in (*_PLANET_KEYS, *_POINT_KEYS, *_ANGLE_KEYS):
+            _ = progressed_chart.objects[idx].sign.name
+    except swe.Error as e:
+        raise DateOutOfRange(str(e)) from e
+
+    progressed_block = ProgressedBlock(
+        planets=_planets_block(progressed_chart),
+        points=_points_block(progressed_chart),
+        angles=_angles_block(progressed_chart),
+    )
+
+    return ProgressionsResponse(
+        subject=ResolvedSubject(
+            name=subject.name,
+            datetime_utc=birth_utc,
+            latitude=location.latitude,
+            longitude=location.longitude,
+            timezone=location.timezone,
+        ),
+        target_date=effective_target,
+        progressed_datetime_utc=progressed_utc,
+        house_system=house_system,
+        natal=natal_block,
+        progressed=progressed_block,
+        progressed_aspects=_extract_planet_to_planet_aspects(progressed_chart),
         warnings=[],
     )

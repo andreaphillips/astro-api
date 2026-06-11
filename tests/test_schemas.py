@@ -13,15 +13,22 @@ from astro_api.schemas import (
     ErrorResponse,
     House,
     HouseSystem,
+    NatalBlock,
     NatalRequest,
     NatalResponse,
     PlanetPlacement,
     Planets,
     PointPlacement,
     Points,
+    ProgressedBlock,
+    ProgressionsRequest,
+    ProgressionsResponse,
     ResolvedSubject,
+    ReturnMoment,
     SignName,
     SkyResponse,
+    SolarReturnRequest,
+    SolarReturnResponse,
     Subject,
     Synastry,
     SynastryRequest,
@@ -486,6 +493,335 @@ def test_sky_response_minimal_fields() -> None:
     assert dumped["datetime_utc"].startswith("2026-04-26T12:00")
     assert dumped["angles"] is None
     assert dumped["warnings"] == []
+
+
+# ---------- Phase 2: ReturnMoment ----------
+
+
+def test_return_moment_constructs_and_keeps_types() -> None:
+    moment = ReturnMoment(
+        datetime_utc=datetime(2026, 12, 9, 7, 42, 13, tzinfo=UTC),
+        latitude=10.30,
+        longitude=-85.84,
+        timezone="America/Costa_Rica",
+    )
+    assert moment.datetime_utc == datetime(2026, 12, 9, 7, 42, 13, tzinfo=UTC)
+    assert moment.latitude == 10.30
+    assert moment.timezone == "America/Costa_Rica"
+
+
+def test_return_moment_rejects_extra_fields() -> None:
+    with pytest.raises(ValidationError):
+        ReturnMoment.model_validate(
+            {
+                "datetime_utc": "2026-12-09T07:42:13Z",
+                "latitude": 10.30,
+                "longitude": -85.84,
+                "timezone": "America/Costa_Rica",
+                "name": "Andrea",
+            }
+        )
+
+
+# ---------- Phase 2: SolarReturnRequest ----------
+
+
+def test_solar_return_request_minimal_payload_matches_spec() -> None:
+    request = SolarReturnRequest.model_validate(
+        {
+            "subject": {
+                "birth_date": "1980-12-09",
+                "birth_time": "10:35",
+                "birth_place": "San José, Costa Rica",
+            },
+            "year": 2026,
+        }
+    )
+    assert request.year == 2026
+    assert isinstance(request.year, int)
+    assert request.relocation_place is None
+    assert request.house_system is None
+
+
+def test_solar_return_request_full_payload_matches_spec_example() -> None:
+    request = SolarReturnRequest.model_validate(
+        {
+            "subject": {
+                "name": "Andrea",
+                "birth_date": "1980-12-09",
+                "birth_time": "10:35",
+                "birth_place": "San José, Costa Rica",
+            },
+            "year": 2026,
+            "relocation_place": "Tamarindo, Costa Rica",
+            "house_system": "placidus",
+        }
+    )
+    assert request.relocation_place == "Tamarindo, Costa Rica"
+    assert isinstance(request.relocation_place, str)
+    assert request.house_system == HouseSystem.PLACIDUS
+
+
+def test_solar_return_request_year_required() -> None:
+    with pytest.raises(ValidationError):
+        SolarReturnRequest.model_validate(
+            {
+                "subject": {
+                    "birth_date": "1980-12-09",
+                    "birth_place": "San José, Costa Rica",
+                }
+            }
+        )
+
+
+def test_solar_return_request_rejects_extra_fields() -> None:
+    with pytest.raises(ValidationError):
+        SolarReturnRequest.model_validate(
+            {
+                "subject": {
+                    "birth_date": "1980-12-09",
+                    "birth_place": "San José, Costa Rica",
+                },
+                "year": 2026,
+                "month": 12,
+            }
+        )
+
+
+# ---------- Phase 2: SolarReturnResponse ----------
+
+
+def test_solar_return_response_round_trip_matches_spec_keys() -> None:
+    response = SolarReturnResponse(
+        subject=_make_resolved_subject(),
+        return_moment=ReturnMoment(
+            datetime_utc=datetime(2026, 12, 9, 7, 42, 13, tzinfo=UTC),
+            latitude=10.30,
+            longitude=-85.84,
+            timezone="America/Costa_Rica",
+        ),
+        relocated=True,
+        house_system=HouseSystem.PLACIDUS,
+        planets=_make_planets(),
+        points=_make_points(),
+        angles=_make_angles(),
+        houses=_make_houses(),
+        aspects=[
+            Aspect.model_validate(
+                {"from": "sun", "to": "moon", "type": "trine", "orb": 1.4, "applying": True}
+            )
+        ],
+    )
+    dumped = response.model_dump(by_alias=True, mode="json")
+    assert set(dumped.keys()) == {
+        "subject",
+        "return_moment",
+        "relocated",
+        "house_system",
+        "planets",
+        "points",
+        "angles",
+        "houses",
+        "aspects",
+        "warnings",
+    }
+    assert dumped["relocated"] is True
+    assert dumped["return_moment"]["timezone"] == "America/Costa_Rica"
+    assert dumped["aspects"][0]["from"] == "sun"
+    assert dumped["warnings"] == []
+
+
+def test_solar_return_response_warnings_default_to_empty_list() -> None:
+    response = SolarReturnResponse(
+        subject=_make_resolved_subject(),
+        return_moment=ReturnMoment(
+            datetime_utc=datetime(2026, 12, 9, 7, 42, 13, tzinfo=UTC),
+            latitude=9.93,
+            longitude=-84.08,
+            timezone="America/Costa_Rica",
+        ),
+        relocated=False,
+        house_system=HouseSystem.PLACIDUS,
+        planets=_make_planets(),
+        points=_make_points(),
+        angles=_make_angles(),
+        houses=_make_houses(),
+        aspects=[],
+    )
+    assert response.warnings == []
+
+
+def test_solar_return_response_rejects_extra_fields() -> None:
+    with pytest.raises(ValidationError):
+        SolarReturnResponse(
+            subject=_make_resolved_subject(),
+            return_moment=ReturnMoment(
+                datetime_utc=datetime(2026, 12, 9, 7, 42, 13, tzinfo=UTC),
+                latitude=9.93,
+                longitude=-84.08,
+                timezone="America/Costa_Rica",
+            ),
+            relocated=False,
+            house_system=HouseSystem.PLACIDUS,
+            planets=_make_planets(),
+            points=_make_points(),
+            angles=_make_angles(),
+            houses=_make_houses(),
+            aspects=[],
+            transits=[],  # type: ignore[call-arg]
+        )
+
+
+# ---------- Phase 2: NatalBlock / ProgressedBlock ----------
+
+
+def test_natal_block_has_houses() -> None:
+    block = NatalBlock(
+        planets=_make_planets(),
+        points=_make_points(),
+        angles=_make_angles(),
+        houses=_make_houses(),
+    )
+    dumped = block.model_dump(by_alias=True, mode="json")
+    assert set(dumped.keys()) == {"planets", "points", "angles", "houses"}
+    assert len(dumped["houses"]) == 12
+
+
+def test_progressed_block_has_no_houses() -> None:
+    block = ProgressedBlock(
+        planets=_make_planets(),
+        points=_make_points(),
+        angles=_make_angles(),
+    )
+    dumped = block.model_dump(by_alias=True, mode="json")
+    assert set(dumped.keys()) == {"planets", "points", "angles"}
+    assert "houses" not in dumped
+    assert "houses" not in ProgressedBlock.model_fields
+
+
+def test_progressed_block_rejects_houses() -> None:
+    with pytest.raises(ValidationError):
+        ProgressedBlock.model_validate(
+            {
+                "planets": _make_planets().model_dump(),
+                "points": _make_points().model_dump(),
+                "angles": _make_angles().model_dump(),
+                "houses": [h.model_dump() for h in _make_houses()],
+            }
+        )
+
+
+# ---------- Phase 2: ProgressionsRequest ----------
+
+
+def test_progressions_request_target_date_optional() -> None:
+    request = ProgressionsRequest.model_validate(
+        {
+            "subject": {
+                "birth_date": "1980-12-09",
+                "birth_time": "10:35",
+                "birth_place": "San José, Costa Rica",
+            }
+        }
+    )
+    assert request.target_date is None
+    assert request.house_system is None
+
+
+def test_progressions_request_parses_iso_target_date_as_date() -> None:
+    request = ProgressionsRequest.model_validate(
+        {
+            "subject": {
+                "birth_date": "1980-12-09",
+                "birth_time": "10:35",
+                "birth_place": "San José, Costa Rica",
+            },
+            "target_date": "2026-04-27",
+            "house_system": "placidus",
+        }
+    )
+    assert request.target_date == date(2026, 4, 27)
+    assert isinstance(request.target_date, date)
+    assert request.house_system == HouseSystem.PLACIDUS
+
+
+def test_progressions_request_rejects_extra_fields() -> None:
+    with pytest.raises(ValidationError):
+        ProgressionsRequest.model_validate(
+            {
+                "subject": {
+                    "birth_date": "1980-12-09",
+                    "birth_place": "San José, Costa Rica",
+                },
+                "progression_type": "secondary",
+            }
+        )
+
+
+# ---------- Phase 2: ProgressionsResponse ----------
+
+
+def test_progressions_response_round_trip_matches_spec_keys() -> None:
+    response = ProgressionsResponse(
+        subject=_make_resolved_subject(),
+        target_date=date(2026, 4, 27),
+        progressed_datetime_utc=datetime(1981, 2, 12, 19, 3, 54, tzinfo=UTC),
+        house_system=HouseSystem.PLACIDUS,
+        natal=NatalBlock(
+            planets=_make_planets(),
+            points=_make_points(),
+            angles=_make_angles(),
+            houses=_make_houses(),
+        ),
+        progressed=ProgressedBlock(
+            planets=_make_planets(),
+            points=_make_points(),
+            angles=_make_angles(),
+        ),
+        progressed_aspects=[
+            Aspect.model_validate(
+                {"from": "moon", "to": "venus", "type": "trine", "orb": 1.2, "applying": True}
+            )
+        ],
+    )
+    dumped = response.model_dump(by_alias=True, mode="json")
+    assert set(dumped.keys()) == {
+        "subject",
+        "target_date",
+        "progressed_datetime_utc",
+        "house_system",
+        "natal",
+        "progressed",
+        "progressed_aspects",
+        "warnings",
+    }
+    assert dumped["target_date"] == "2026-04-27"
+    assert "houses" not in dumped["progressed"]
+    assert "houses" in dumped["natal"]
+    assert dumped["progressed_aspects"][0]["from"] == "moon"
+    assert dumped["warnings"] == []
+
+
+def test_progressions_response_warnings_default_to_empty_list() -> None:
+    response = ProgressionsResponse(
+        subject=_make_resolved_subject(),
+        target_date=date(2026, 4, 27),
+        progressed_datetime_utc=datetime(1981, 2, 12, 19, 3, 54, tzinfo=UTC),
+        house_system=HouseSystem.PLACIDUS,
+        natal=NatalBlock(
+            planets=_make_planets(),
+            points=_make_points(),
+            angles=_make_angles(),
+            houses=_make_houses(),
+        ),
+        progressed=ProgressedBlock(
+            planets=_make_planets(),
+            points=_make_points(),
+            angles=_make_angles(),
+        ),
+        progressed_aspects=[],
+    )
+    assert response.warnings == []
 
 
 # ---------- ErrorResponse ----------
