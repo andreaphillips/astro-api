@@ -16,15 +16,22 @@ __all__ = [
     "ErrorResponse",
     "House",
     "HouseSystem",
+    "NatalBlock",
     "NatalRequest",
     "NatalResponse",
     "Planets",
     "PlanetPlacement",
     "Points",
     "PointPlacement",
+    "ProgressedBlock",
+    "ProgressionsRequest",
+    "ProgressionsResponse",
     "ResolvedSubject",
+    "ReturnMoment",
     "SignName",
     "SkyResponse",
+    "SolarReturnRequest",
+    "SolarReturnResponse",
     "Subject",
     "Synastry",
     "SynastryRequest",
@@ -227,6 +234,72 @@ class SkyResponse(_StrictModel):
     planets: Planets
     points: Points
     angles: Angles | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+# ---------- Phase 2: Solar Return + Progressions ----------
+
+
+class ReturnMoment(_StrictModel):
+    """Exact instant of a solar return plus the location the chart was cast at."""
+
+    datetime_utc: datetime
+    latitude: float
+    longitude: float
+    timezone: str
+
+
+class SolarReturnRequest(_StrictModel):
+    subject: Subject
+    year: int
+    relocation_place: str | None = None
+    house_system: HouseSystem | None = None
+
+
+class SolarReturnResponse(_StrictModel):
+    subject: ResolvedSubject
+    return_moment: ReturnMoment
+    relocated: bool
+    house_system: HouseSystem
+    planets: Planets
+    points: Points
+    angles: Angles | None
+    houses: list[House] | None
+    aspects: list[Aspect]
+    warnings: list[str] = Field(default_factory=list)
+
+
+class NatalBlock(_StrictModel):
+    """Natal positions carried in the progressions response for cross-reference."""
+
+    planets: Planets
+    points: Points
+    angles: Angles | None
+    houses: list[House] | None
+
+
+class ProgressedBlock(_StrictModel):
+    """Progressed positions. No houses — natal houses are the reference frame."""
+
+    planets: Planets
+    points: Points
+    angles: Angles | None
+
+
+class ProgressionsRequest(_StrictModel):
+    subject: Subject
+    target_date: date | None = None
+    house_system: HouseSystem | None = None
+
+
+class ProgressionsResponse(_StrictModel):
+    subject: ResolvedSubject
+    target_date: date
+    progressed_datetime_utc: datetime
+    house_system: HouseSystem
+    natal: NatalBlock
+    progressed: ProgressedBlock
+    progressed_aspects: list[Aspect]
     warnings: list[str] = Field(default_factory=list)
 
 

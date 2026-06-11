@@ -10,7 +10,17 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 
 from astro_api.auth import require_api_key
-from astro_api.charts import DateOutOfRange, build_natal, build_sky, build_synastry, build_transits
+from astro_api.charts import (
+    BirthTimeRequiredForProgressions,
+    BirthTimeRequiredForSolarReturn,
+    DateOutOfRange,
+    build_natal,
+    build_progressions,
+    build_sky,
+    build_solar_return,
+    build_synastry,
+    build_transits,
+)
 from astro_api.charts import ResolvedLocation as ChartsResolvedLocation
 from astro_api.geocoding import (
     GeocodingTimeout,
@@ -21,7 +31,11 @@ from astro_api.geocoding import (
 from astro_api.schemas import (
     NatalRequest,
     NatalResponse,
+    ProgressionsRequest,
+    ProgressionsResponse,
     SkyResponse,
+    SolarReturnRequest,
+    SolarReturnResponse,
     SynastryRequest,
     SynastryResponse,
     TransitsRequest,
@@ -125,6 +139,34 @@ async def date_out_of_range_handler(request: Request, exc: DateOutOfRange) -> JS
     )
 
 
+@app.exception_handler(BirthTimeRequiredForSolarReturn)
+async def birth_time_required_for_solar_return_handler(
+    request: Request, _exc: BirthTimeRequiredForSolarReturn
+) -> JSONResponse:
+    request.state.error_code = "birth_time_required_for_solar_return"
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "birth_time_required_for_solar_return",
+            "detail": "A solar return requires the subject's exact birth_time.",
+        },
+    )
+
+
+@app.exception_handler(BirthTimeRequiredForProgressions)
+async def birth_time_required_for_progressions_handler(
+    request: Request, _exc: BirthTimeRequiredForProgressions
+) -> JSONResponse:
+    request.state.error_code = "birth_time_required_for_progressions"
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "birth_time_required_for_progressions",
+            "detail": "Secondary progressions require the subject's exact birth_time.",
+        },
+    )
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, _exc: Exception) -> JSONResponse:
     request.state.error_code = "internal_error"
@@ -216,6 +258,60 @@ def post_synastry(
     )
     _surface_multiple_matches(response.subject_a.warnings, location_a)
     _surface_multiple_matches(response.subject_b.warnings, location_b)
+    return response
+
+
+@app.post(
+    "/v1/solar-return",
+    response_model=SolarReturnResponse,
+    dependencies=[Depends(require_api_key)],
+    operation_id="post_solar_return",
+)
+def post_solar_return(
+    payload: SolarReturnRequest,
+    settings: SettingsDep,
+) -> SolarReturnResponse:
+    if payload.subject.birth_time is None:
+        raise BirthTimeRequiredForSolarReturn
+    location = resolve_place(payload.subject.birth_place)
+    relocation: ResolvedLocation | None = None
+    if payload.relocation_place is not None:
+        relocation = resolve_place(payload.relocation_place)
+    house_system = payload.house_system or settings.default_house_system
+    response = build_solar_return(
+        payload.subject,
+        _to_charts_location(location),
+        payload.year,
+        _to_charts_location(relocation) if relocation is not None else None,
+        house_system,
+    )
+    _surface_multiple_matches(response.warnings, location)
+    if relocation is not None:
+        _surface_multiple_matches(response.warnings, relocation)
+    return response
+
+
+@app.post(
+    "/v1/progressions",
+    response_model=ProgressionsResponse,
+    dependencies=[Depends(require_api_key)],
+    operation_id="post_progressions",
+)
+def post_progressions(
+    payload: ProgressionsRequest,
+    settings: SettingsDep,
+) -> ProgressionsResponse:
+    if payload.subject.birth_time is None:
+        raise BirthTimeRequiredForProgressions
+    location = resolve_place(payload.subject.birth_place)
+    house_system = payload.house_system or settings.default_house_system
+    response = build_progressions(
+        payload.subject,
+        _to_charts_location(location),
+        payload.target_date,
+        house_system,
+    )
+    _surface_multiple_matches(response.warnings, location)
     return response
 
 
