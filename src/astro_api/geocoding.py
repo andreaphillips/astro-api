@@ -43,6 +43,7 @@ class ResolvedLocation:
     latitude: float
     longitude: float
     timezone: str
+    display_name: str = ""  # Nominatim's full display name for the chosen result
     warnings: tuple[WarningCode, ...] = ()
 
 
@@ -82,6 +83,7 @@ def _resolve_normalized(normalized: str) -> ResolvedLocation:
         latitude=float(first.latitude),
         longitude=float(first.longitude),
         timezone=timezone,
+        display_name=first.address,
         warnings=warnings,
     )
 

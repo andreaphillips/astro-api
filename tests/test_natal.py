@@ -80,6 +80,11 @@ def test_all_points_present_and_part_of_fortune_populated(chart: NatalResponse) 
     assert 0.0 <= chart.points.part_of_fortune.degree < 30.0
 
 
+def test_vertex_populated_when_birth_time_given(chart: NatalResponse) -> None:
+    assert chart.points.vertex is not None
+    assert 0.0 <= chart.points.vertex.degree < 30.0
+
+
 def test_angles_populated_when_birth_time_given(chart: NatalResponse) -> None:
     assert chart.angles is not None
     assert isinstance(chart.angles, Angles)
@@ -113,6 +118,13 @@ def test_aspects_are_majors_only_and_sorted_by_orb(chart: NatalResponse) -> None
     assert orbs == sorted(orbs)
 
 
+def test_aspects_orbs_have_decimal_precision(chart: NatalResponse) -> None:
+    # orb = abs(difference.raw) rounded to 2dp — at least some aspects should be non-integer.
+    assert any(a.orb != round(a.orb) for a in chart.aspects), (
+        "all orbs are integers — likely using max-allowed orb instead of actual orb"
+    )
+
+
 def test_aspect_endpoints_reference_known_bodies(chart: NatalResponse) -> None:
     valid = set(EXPECTED_PLANETS) | set(EXPECTED_POINTS) | set(EXPECTED_ANGLES)
     for a in chart.aspects:
@@ -133,7 +145,7 @@ def test_warnings_empty_when_birth_time_provided(chart: NatalResponse) -> None:
 # ---------- Edge case: missing birth_time ----------
 
 
-def test_no_birth_time_nulls_houses_angles_and_part_of_fortune() -> None:
+def test_no_birth_time_nulls_houses_angles_part_of_fortune_and_vertex() -> None:
     subject = Subject(
         name="Andrea",
         birth_date=date(1989, 5, 12),
@@ -144,7 +156,8 @@ def test_no_birth_time_nulls_houses_angles_and_part_of_fortune() -> None:
     assert response.houses is None
     assert response.angles is None
     assert response.points.part_of_fortune is None
-    # Other points still populated — only PoF depends on the angle.
+    assert response.points.vertex is None  # F2: vertex depends on Asc just like angles
+    # Other points still populated — only Asc-dependent ones are nulled.
     assert response.points.north_node is not None
     assert response.points.lilith is not None
 

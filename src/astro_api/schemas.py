@@ -100,6 +100,7 @@ class ResolvedSubject(_StrictModel):
     latitude: float
     longitude: float
     timezone: str
+    place_label: str | None = None  # Nominatim display name; confirms which place was resolved
 
 
 class PlanetPlacement(_StrictModel):
@@ -147,7 +148,7 @@ class Points(_StrictModel):
     north_node: PointPlacement
     south_node: PointPlacement
     lilith: PointPlacement
-    vertex: PointPlacement
+    vertex: PointPlacement | None  # null when birth_time_unknown (depends on Asc like angles)
     part_of_fortune: PointPlacement | None
 
 
