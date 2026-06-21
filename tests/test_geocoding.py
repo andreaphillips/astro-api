@@ -13,7 +13,9 @@ from astro_api.geocoding import (
 
 
 class _FakeLocation:
-    def __init__(self, latitude: float, longitude: float, address: str = "Fake City, Country") -> None:
+    def __init__(
+        self, latitude: float, longitude: float, address: str = "Fake City, Country"
+    ) -> None:
         self.latitude = latitude
         self.longitude = longitude
         self.address = address
