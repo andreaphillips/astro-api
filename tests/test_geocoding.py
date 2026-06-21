@@ -13,9 +13,12 @@ from astro_api.geocoding import (
 
 
 class _FakeLocation:
-    def __init__(self, latitude: float, longitude: float) -> None:
+    def __init__(
+        self, latitude: float, longitude: float, address: str = "Fake City, Country"
+    ) -> None:
         self.latitude = latitude
         self.longitude = longitude
+        self.address = address
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +35,9 @@ def _patch_nominatim(monkeypatch: pytest.MonkeyPatch, geocode_mock: MagicMock) -
 
 
 def test_resolve_place_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    geocode = MagicMock(return_value=[_FakeLocation(40.7128, -74.0060)])
+    geocode = MagicMock(
+        return_value=[_FakeLocation(40.7128, -74.0060, "New York City, New York, United States")]
+    )
     _patch_nominatim(monkeypatch, geocode)
 
     result = resolve_place("New York, NY")
@@ -41,6 +46,7 @@ def test_resolve_place_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.latitude == pytest.approx(40.7128)
     assert result.longitude == pytest.approx(-74.0060)
     assert result.timezone == "America/New_York"
+    assert result.display_name == "New York City, New York, United States"
     assert result.warnings == ()
     geocode.assert_called_once()
 

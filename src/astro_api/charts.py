@@ -58,6 +58,7 @@ class ResolvedLocation:
     latitude: float
     longitude: float
     timezone: str  # IANA timezone name, e.g. "America/Caracas"
+    place_label: str | None = None  # Nominatim display name forwarded from geocoding
 
 
 class DateOutOfRange(Exception):
@@ -250,7 +251,7 @@ def _extract_aspects(natal: Any) -> list[Aspect]:
                         "from": _BODY_KEYS[a],
                         "to": _BODY_KEYS[b],
                         "type": _ASPECT_TYPE_BY_NAME[asp.type].value,
-                        "orb": float(asp.orb),
+                        "orb": round(abs(float(asp.difference.raw)), 2),
                         "applying": bool(asp.movement.applicative),
                     }
                 )
@@ -281,7 +282,7 @@ def _extract_planet_to_planet_aspects(chart_with_aspects_to: Any) -> list[Aspect
                         "from": _PLANET_KEYS[active_idx],
                         "to": _PLANET_KEYS[passive_idx],
                         "type": _ASPECT_TYPE_BY_NAME[asp.type].value,
-                        "orb": float(asp.orb),
+                        "orb": round(abs(float(asp.difference.raw)), 2),
                         "applying": bool(asp.movement.applicative),
                     }
                 )
@@ -310,7 +311,7 @@ def _extract_cross_aspects(chart_with_aspects_to: Any) -> list[CrossAspect]:
                     from_a=_BODY_KEYS[active_idx],
                     to_b=_BODY_KEYS[passive_idx],
                     type=_ASPECT_TYPE_BY_NAME[asp.type],
-                    orb=float(asp.orb),
+                    orb=round(abs(float(asp.difference.raw)), 2),
                     applying=bool(asp.movement.applicative),
                 )
             )
@@ -324,6 +325,12 @@ def _local_naive_string(birth_date: Any, birth_time: time | None) -> str:
 
 
 def _utc_datetime(birth_date: Any, birth_time: time | None, tz_name: str) -> datetime:
+    # LIMITATION (F1): for dates before timezone standardization (~1893), IANA zones
+    # use LMT derived from an arbitrary reference meridian (e.g. Berlin for all of
+    # Germany) rather than the true solar LMT of the birth location. This can cause
+    # angles to be off ~3° for historical charts (e.g. Einstein, Ulm 1879). Accepted
+    # limitation: true-LMT correction from the birth-place longitude is not implemented.
+    # Callers querying historical charts should be aware of this. See astro-api-fixes.md.
     t = birth_time if birth_time is not None else time(12, 0)
     try:
         tz = ZoneInfo(tz_name)
@@ -381,7 +388,8 @@ def _natal_response(
 
     points_kwargs: dict[str, PointPlacement | None] = {}
     for idx, key in _POINT_KEYS.items():
-        if key == "part_of_fortune" and birth_time_unknown:
+        # Vertex and Part of Fortune both depend on the Ascendant (location + time).
+        if key in ("part_of_fortune", "vertex") and birth_time_unknown:
             points_kwargs[key] = None
         else:
             points_kwargs[key] = _point_placement(
@@ -417,6 +425,7 @@ def _natal_response(
             latitude=location.latitude,
             longitude=location.longitude,
             timezone=location.timezone,
+            place_label=location.place_label,
         ),
         house_system=house_system,
         planets=planets,
@@ -675,6 +684,7 @@ def build_solar_return(
             latitude=location.latitude,
             longitude=location.longitude,
             timezone=location.timezone,
+            place_label=location.place_label,
         ),
         return_moment=ReturnMoment(
             datetime_utc=return_moment_utc,
@@ -754,6 +764,7 @@ def build_progressions(
             latitude=location.latitude,
             longitude=location.longitude,
             timezone=location.timezone,
+            place_label=location.place_label,
         ),
         target_date=effective_target,
         progressed_datetime_utc=progressed_utc,

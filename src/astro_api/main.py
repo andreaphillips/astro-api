@@ -184,6 +184,7 @@ def _to_charts_location(location: ResolvedLocation) -> ChartsResolvedLocation:
         latitude=location.latitude,
         longitude=location.longitude,
         timezone=location.timezone,
+        place_label=location.display_name or None,
     )
 
 
