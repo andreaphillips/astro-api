@@ -13,9 +13,9 @@ from astro_api.geocoding import (
     PlaceNotFound,
     ResolvedLocation,
 )
-from astro_api.main import app
+from astro_api.main import LOCAL_BASE_URL, app, resolve_base_url
 
-API_KEY = "test-secret"
+API_KEY = "test-secret-padded-to-32-chars-min"
 
 ANDREA_PLACE = "Maracaibo, Venezuela"
 ANDREA_LOCATION = ResolvedLocation(
@@ -328,3 +328,28 @@ def test_logging_middleware_records_error_code(
     payload = _json.loads(last_line)
     assert payload["status"] == 422
     assert payload["error_code"] == "place_not_found"
+
+
+# ---------- Base URL resolution for the OpenAPI `servers` block ----------
+
+
+def test_explicit_public_base_url_wins() -> None:
+    env = {
+        "PUBLIC_BASE_URL": "https://astro.example.com/",
+        "RAILWAY_PUBLIC_DOMAIN": "ignored.up.railway.app",
+    }
+    assert resolve_base_url(env) == "https://astro.example.com"
+
+
+def test_falls_back_to_railway_domain() -> None:
+    env = {"RAILWAY_PUBLIC_DOMAIN": "astro-api-production.up.railway.app"}
+    assert resolve_base_url(env) == "https://astro-api-production.up.railway.app"
+
+
+def test_empty_public_base_url_does_not_shadow_railway() -> None:
+    env = {"PUBLIC_BASE_URL": "", "RAILWAY_PUBLIC_DOMAIN": "astro.up.railway.app"}
+    assert resolve_base_url(env) == "https://astro.up.railway.app"
+
+
+def test_falls_back_to_localhost_when_nothing_is_set() -> None:
+    assert resolve_base_url({}) == LOCAL_BASE_URL

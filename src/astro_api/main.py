@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Annotated, Any
 
@@ -45,18 +46,38 @@ from astro_api.settings import Settings, get_settings
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
+SOURCE_URL = "https://github.com/andreaphillips/astro-api"
+
 API_DESCRIPTION = (
     "Stateless HTTP API exposing Western astrology calculations "
     "(natal charts, transits, synastry, current sky) computed via the Swiss "
     "Ephemeris. Consumed by an LLM client (Claude / ChatGPT) through Delegate, "
-    "which auto-generates MCP tools from this OpenAPI spec."
+    "which auto-generates MCP tools from this OpenAPI spec.\n\n"
+    f"Licensed under AGPL-3.0-or-later. Source: {SOURCE_URL}"
 )
 
-_PUBLIC_BASE_URL = os.environ.get(
-    "PUBLIC_BASE_URL",
-    "https://astro-api-production-8a8b.up.railway.app",
-).rstrip("/")
-_SERVERS = [{"url": _PUBLIC_BASE_URL, "description": "Production"}]
+LOCAL_BASE_URL = "http://127.0.0.1:8000"
+
+
+def resolve_base_url(env: Mapping[str, str] | None = None) -> str:
+    """Base URL this API advertises in its OpenAPI `servers` block.
+
+    Explicit PUBLIC_BASE_URL wins; otherwise fall back to the domain Railway
+    injects, so a deployment needs no manual configuration. Falls back to
+    localhost last so a clone never advertises someone else's deployment.
+    """
+    env = os.environ if env is None else env
+    explicit = env.get("PUBLIC_BASE_URL")
+    if explicit:
+        return explicit.rstrip("/")
+    railway_domain = env.get("RAILWAY_PUBLIC_DOMAIN")
+    if railway_domain:
+        return f"https://{railway_domain}".rstrip("/")
+    return LOCAL_BASE_URL
+
+
+_PUBLIC_BASE_URL = resolve_base_url()
+_SERVERS = [{"url": _PUBLIC_BASE_URL, "description": "Configured deployment"}]
 
 app = FastAPI(
     title="astro-api",

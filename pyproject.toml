@@ -3,6 +3,8 @@ name = "astro-api"
 version = "0.1.0"
 description = "Stateless HTTP API exposing Western astrology calculations via Swiss Ephemeris."
 readme = "README.md"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",

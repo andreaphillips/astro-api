@@ -12,7 +12,7 @@ from astro_api import main as main_module
 from astro_api.geocoding import PlaceNotFound, ResolvedLocation
 from astro_api.main import app
 
-API_KEY = "test-secret"
+API_KEY = "test-secret-padded-to-32-chars-min"
 
 BIRTH_PLACE = "San José, Costa Rica"
 BIRTH_LOCATION = ResolvedLocation(latitude=9.93, longitude=-84.08, timezone="America/Costa_Rica")

@@ -22,7 +22,13 @@ class Settings(BaseSettings):
     )
 
     # Auth
-    astro_api_key: str = Field(..., description="Shared secret required on all /v1/* endpoints.")
+    # min_length guards the realistic failure: copying .env.example without
+    # filling ASTRO_API_KEY would otherwise boot an unauthenticated API.
+    astro_api_key: str = Field(
+        ...,
+        min_length=32,
+        description="Shared secret required on all /v1/* endpoints.",
+    )
 
     # Geocoding
     nominatim_user_agent: str = "astro-api/1.0 (aphillipsr@gmail.com)"
