@@ -88,6 +88,7 @@ def _patch_resolve(
         ("post", "/v1/natal", ANDREA_PAYLOAD),
         ("post", "/v1/transits", {"natal_subject": ANDREA_PAYLOAD["subject"]}),
         ("post", "/v1/synastry", SYNASTRY_PAYLOAD),
+        ("post", "/v1/composite", SYNASTRY_PAYLOAD),
         ("get", "/v1/sky", None),
     ],
 )
@@ -153,6 +154,20 @@ def test_post_synastry_happy_path(client: TestClient, monkeypatch: pytest.Monkey
     assert body["subject_a"]["subject"]["name"] == "Andrea"
     assert body["subject_b"]["subject"]["name"] == "Sister"
     assert "cross_aspects" in body["synastry"]
+
+
+def test_post_composite_happy_path(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_resolve(monkeypatch)
+    response = client.post(
+        "/v1/composite",
+        json=SYNASTRY_PAYLOAD,
+        headers={"X-API-Key": API_KEY},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["subject_a"]["name"] == "Andrea"
+    assert body["subject_b"]["name"] == "Sister"
+    assert len(body["houses"]) == 12
 
 
 def test_get_sky_happy_path(client: TestClient) -> None:
@@ -273,7 +288,7 @@ def test_openapi_defines_apikey_security_scheme(client: TestClient) -> None:
 def test_openapi_applies_security_to_v1_endpoints(client: TestClient) -> None:
     schema = client.get("/openapi.json").json()
     paths = schema["paths"]
-    for path in ("/v1/natal", "/v1/transits", "/v1/synastry", "/v1/sky"):
+    for path in ("/v1/natal", "/v1/transits", "/v1/synastry", "/v1/composite", "/v1/sky"):
         for op in paths[path].values():
             assert op["security"] == [{"ApiKeyAuth": []}], f"missing security on {path}"
 

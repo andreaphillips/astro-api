@@ -1,6 +1,6 @@
 # astro-api
 
-Stateless HTTP API exposing Western astrology calculations (natal charts, transits, synastry, current sky) via the Swiss Ephemeris. Designed to be consumed by an LLM client (Claude, ChatGPT) through Delegate's auto-generated MCP tools.
+Stateless HTTP API exposing Western astrology calculations (natal charts, transits, synastry, composite charts, current sky) via the Swiss Ephemeris. Designed to be consumed by an LLM client (Claude, ChatGPT) through Delegate's auto-generated MCP tools.
 
 See `docs/superpowers/specs/2026-04-26-astro-api-design.md` for the full design spec.
 

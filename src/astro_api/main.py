@@ -15,6 +15,7 @@ from astro_api.charts import (
     BirthTimeRequiredForProgressions,
     BirthTimeRequiredForSolarReturn,
     DateOutOfRange,
+    build_composite,
     build_natal,
     build_progressions,
     build_sky,
@@ -30,6 +31,7 @@ from astro_api.geocoding import (
     resolve_place,
 )
 from astro_api.schemas import (
+    CompositeResponse,
     NatalRequest,
     NatalResponse,
     ProgressionsRequest,
@@ -50,7 +52,8 @@ SOURCE_URL = "https://github.com/andreaphillips/astro-api"
 
 API_DESCRIPTION = (
     "Stateless HTTP API exposing Western astrology calculations "
-    "(natal charts, transits, synastry, current sky) computed via the Swiss "
+    "(natal charts, transits, synastry, composite charts, current sky) computed "
+    "via the Swiss "
     "Ephemeris. Consumed by an LLM client (Claude / ChatGPT) through Delegate, "
     "which auto-generates MCP tools from this OpenAPI spec.\n\n"
     f"Licensed under AGPL-3.0-or-later. Source: {SOURCE_URL}"
@@ -280,6 +283,32 @@ def post_synastry(
     )
     _surface_multiple_matches(response.subject_a.warnings, location_a)
     _surface_multiple_matches(response.subject_b.warnings, location_b)
+    return response
+
+
+@app.post(
+    "/v1/composite",
+    response_model=CompositeResponse,
+    dependencies=[Depends(require_api_key)],
+    operation_id="post_composite",
+    summary="Midpoint composite chart of two people (the relationship as one chart)",
+)
+def post_composite(
+    payload: SynastryRequest,
+    settings: SettingsDep,
+) -> CompositeResponse:
+    location_a = resolve_place(payload.subject_a.birth_place)
+    location_b = resolve_place(payload.subject_b.birth_place)
+    house_system = payload.house_system or settings.default_house_system
+    response = build_composite(
+        payload.subject_a,
+        _to_charts_location(location_a),
+        payload.subject_b,
+        _to_charts_location(location_b),
+        house_system,
+    )
+    _surface_multiple_matches(response.warnings, location_a)
+    _surface_multiple_matches(response.warnings, location_b)
     return response
 
 

@@ -14,6 +14,7 @@ from astro_api.schemas import (
     Angles,
     Aspect,
     AspectType,
+    CompositeResponse,
     CrossAspect,
     Dignity,
     House,
@@ -42,6 +43,7 @@ __all__ = [
     "BirthTimeRequiredForSolarReturn",
     "DateOutOfRange",
     "ResolvedLocation",
+    "build_composite",
     "build_natal",
     "build_progressions",
     "build_sky",
@@ -545,6 +547,96 @@ def build_synastry(
         subject_b=response_b,
         synastry=Synastry(cross_aspects=cross_aspects),
         warnings=[],
+    )
+
+
+def build_composite(
+    subject_a: Subject,
+    location_a: ResolvedLocation,
+    subject_b: Subject,
+    location_b: ResolvedLocation,
+    house_system: HouseSystem,
+) -> CompositeResponse:
+    """Midpoint composite chart: one chart for the relationship itself.
+
+    Every body, point, angle and house cusp sits at the shorter-arc midpoint of
+    its two natal positions (Immanuel's ``Composite``). If either birth time is
+    unknown, that subject falls back to noon and the time-dependent parts
+    (angles, houses, Vertex, Part of Fortune) are omitted — same rule as natal.
+    """
+    _configure_immanuel(house_system)
+    native, partner = (
+        immanuel_charts.Subject(
+            date_time=_local_naive_string(s.birth_date, s.birth_time),
+            latitude=loc.latitude,
+            longitude=loc.longitude,
+            timezone=loc.timezone,
+        )
+        for s, loc in ((subject_a, location_a), (subject_b, location_b))
+    )
+    try:
+        chart = immanuel_charts.Composite(native, partner)
+        # Touch every object so out-of-range errors surface here, not later.
+        for idx in (*_PLANET_KEYS, *_POINT_KEYS, *_ANGLE_KEYS):
+            _ = chart.objects[idx].sign.name
+    except swe.Error as e:
+        raise DateOutOfRange(str(e)) from e
+
+    # Reuse the natal projection for the chart blocks. Its time-unknown handling
+    # keys off the subject it's given, so hand it one with no time if either
+    # input lacks one; its `subject` field is discarded below.
+    time_unknown = subject_a.birth_time is None or subject_b.birth_time is None
+    proxy = subject_a.model_copy(update={"birth_time": None}) if time_unknown else subject_a
+    blocks = _natal_response(chart, subject=proxy, location=location_a, house_system=house_system)
+    if house_system is HouseSystem.WHOLE_SIGN and blocks.angles is not None:
+        blocks = _rehouse_whole_sign(blocks)
+
+    return CompositeResponse(
+        subject_a=_resolved_subject(subject_a, location_a),
+        subject_b=_resolved_subject(subject_b, location_b),
+        house_system=house_system,
+        planets=blocks.planets,
+        points=blocks.points,
+        angles=blocks.angles,
+        houses=blocks.houses,
+        aspects=blocks.aspects,
+        warnings=blocks.warnings,
+    )
+
+
+def _rehouse_whole_sign(blocks: NatalResponse) -> NatalResponse:
+    """Rebuild whole-sign houses from the composite Ascendant's sign.
+
+    Immanuel casts composite whole-sign houses from the midpoint ARMC, but the
+    composite Ascendant is the plain midpoint of the two Ascendants — the two can
+    land in different signs (e.g. Asc 29° Scorpio, house 1 Sagittarius), which
+    shifts every house assignment. Whole sign means house 1 = Ascendant's sign.
+    """
+    signs = list(SignName)
+    asc = signs.index(blocks.angles.ascendant.sign)  # type: ignore[union-attr]
+
+    def rehouse(p: Any) -> Any:
+        return p and p.model_copy(update={"house": (signs.index(p.sign) - asc) % 12 + 1})
+
+    return blocks.model_copy(
+        update={
+            "planets": Planets(**{k: rehouse(v) for k, v in blocks.planets}),
+            "points": Points(**{k: rehouse(v) for k, v in blocks.points}),
+            "houses": [
+                House(number=n + 1, sign=signs[(asc + n) % 12], cusp_degree=0.0) for n in range(12)
+            ],
+        }
+    )
+
+
+def _resolved_subject(subject: Subject, location: ResolvedLocation) -> ResolvedSubject:
+    return ResolvedSubject(
+        name=subject.name,
+        datetime_utc=_utc_datetime(subject.birth_date, subject.birth_time, location.timezone),
+        latitude=location.latitude,
+        longitude=location.longitude,
+        timezone=location.timezone,
+        place_label=location.place_label,
     )
 
 
