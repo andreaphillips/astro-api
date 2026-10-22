@@ -1,3 +1,4 @@
+import secrets
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, status
@@ -16,7 +17,11 @@ def require_api_key(settings: SettingsDep, x_api_key: ApiKeyHeader = None) -> No
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing X-API-Key header.",
         )
-    if x_api_key != settings.astro_api_key:
+    # Compare as bytes: compare_digest rejects non-ASCII str, and header values
+    # arrive latin-1 decoded, so a non-ASCII key would raise instead of 401.
+    if not secrets.compare_digest(
+        x_api_key.encode("utf-8"), settings.astro_api_key.encode("utf-8")
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid X-API-Key.",

@@ -13,9 +13,9 @@ from astro_api.geocoding import (
     PlaceNotFound,
     ResolvedLocation,
 )
-from astro_api.main import app
+from astro_api.main import LOCAL_BASE_URL, app, resolve_base_url
 
-API_KEY = "test-secret"
+API_KEY = "test-secret-padded-to-32-chars-min"
 
 ANDREA_PLACE = "Maracaibo, Venezuela"
 ANDREA_LOCATION = ResolvedLocation(
@@ -88,6 +88,7 @@ def _patch_resolve(
         ("post", "/v1/natal", ANDREA_PAYLOAD),
         ("post", "/v1/transits", {"natal_subject": ANDREA_PAYLOAD["subject"]}),
         ("post", "/v1/synastry", SYNASTRY_PAYLOAD),
+        ("post", "/v1/composite", SYNASTRY_PAYLOAD),
         ("get", "/v1/sky", None),
     ],
 )
@@ -153,6 +154,20 @@ def test_post_synastry_happy_path(client: TestClient, monkeypatch: pytest.Monkey
     assert body["subject_a"]["subject"]["name"] == "Andrea"
     assert body["subject_b"]["subject"]["name"] == "Sister"
     assert "cross_aspects" in body["synastry"]
+
+
+def test_post_composite_happy_path(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_resolve(monkeypatch)
+    response = client.post(
+        "/v1/composite",
+        json=SYNASTRY_PAYLOAD,
+        headers={"X-API-Key": API_KEY},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["subject_a"]["name"] == "Andrea"
+    assert body["subject_b"]["name"] == "Sister"
+    assert len(body["houses"]) == 12
 
 
 def test_get_sky_happy_path(client: TestClient) -> None:
@@ -273,7 +288,7 @@ def test_openapi_defines_apikey_security_scheme(client: TestClient) -> None:
 def test_openapi_applies_security_to_v1_endpoints(client: TestClient) -> None:
     schema = client.get("/openapi.json").json()
     paths = schema["paths"]
-    for path in ("/v1/natal", "/v1/transits", "/v1/synastry", "/v1/sky"):
+    for path in ("/v1/natal", "/v1/transits", "/v1/synastry", "/v1/composite", "/v1/sky"):
         for op in paths[path].values():
             assert op["security"] == [{"ApiKeyAuth": []}], f"missing security on {path}"
 
@@ -328,3 +343,28 @@ def test_logging_middleware_records_error_code(
     payload = _json.loads(last_line)
     assert payload["status"] == 422
     assert payload["error_code"] == "place_not_found"
+
+
+# ---------- Base URL resolution for the OpenAPI `servers` block ----------
+
+
+def test_explicit_public_base_url_wins() -> None:
+    env = {
+        "PUBLIC_BASE_URL": "https://astro.example.com/",
+        "RAILWAY_PUBLIC_DOMAIN": "ignored.up.railway.app",
+    }
+    assert resolve_base_url(env) == "https://astro.example.com"
+
+
+def test_falls_back_to_railway_domain() -> None:
+    env = {"RAILWAY_PUBLIC_DOMAIN": "astro-api-production.up.railway.app"}
+    assert resolve_base_url(env) == "https://astro-api-production.up.railway.app"
+
+
+def test_empty_public_base_url_does_not_shadow_railway() -> None:
+    env = {"PUBLIC_BASE_URL": "", "RAILWAY_PUBLIC_DOMAIN": "astro.up.railway.app"}
+    assert resolve_base_url(env) == "https://astro.up.railway.app"
+
+
+def test_falls_back_to_localhost_when_nothing_is_set() -> None:
+    assert resolve_base_url({}) == LOCAL_BASE_URL

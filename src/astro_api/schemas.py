@@ -11,6 +11,7 @@ __all__ = [
     "Angles",
     "Aspect",
     "AspectType",
+    "CompositeResponse",
     "CrossAspect",
     "Dignity",
     "ErrorResponse",
@@ -227,6 +228,20 @@ class SynastryResponse(_StrictModel):
     subject_a: NatalResponse
     subject_b: NatalResponse
     synastry: Synastry
+    warnings: list[str] = Field(default_factory=list)
+
+
+class CompositeResponse(_StrictModel):
+    """Midpoint composite chart. Takes the same body as /v1/synastry."""
+
+    subject_a: ResolvedSubject
+    subject_b: ResolvedSubject
+    house_system: HouseSystem
+    planets: Planets
+    points: Points
+    angles: Angles | None
+    houses: list[House] | None
+    aspects: list[Aspect]
     warnings: list[str] = Field(default_factory=list)
 
 

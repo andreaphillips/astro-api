@@ -29,7 +29,7 @@ the procedure to refresh ``tests/fixtures/known_charts.json`` is:
      note below) to capture the new engine output:
 
          uv run python -c "
-         import os; os.environ['ASTRO_API_KEY']='regen'
+         import os; os.environ['ASTRO_API_KEY']='regen-padded-to-32-chars-minimum'
          from datetime import date, time
          from astro_api.charts import ResolvedLocation, build_natal
          from astro_api.schemas import HouseSystem, Subject
@@ -63,7 +63,7 @@ from astro_api.geocoding import ResolvedLocation
 from astro_api.main import app
 from astro_api.settings import get_settings
 
-API_KEY = "test-snapshot"
+API_KEY = "test-snapshot-padded-to-32-chars"
 TOLERANCE_DEGREES = 0.05
 FIXTURES_PATH = Path(__file__).parent / "fixtures" / "known_charts.json"
 

@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Annotated, Any
 
@@ -14,6 +15,7 @@ from astro_api.charts import (
     BirthTimeRequiredForProgressions,
     BirthTimeRequiredForSolarReturn,
     DateOutOfRange,
+    build_composite,
     build_natal,
     build_progressions,
     build_sky,
@@ -29,6 +31,7 @@ from astro_api.geocoding import (
     resolve_place,
 )
 from astro_api.schemas import (
+    CompositeResponse,
     NatalRequest,
     NatalResponse,
     ProgressionsRequest,
@@ -45,18 +48,39 @@ from astro_api.settings import Settings, get_settings
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
+SOURCE_URL = "https://github.com/andreaphillips/astro-api"
+
 API_DESCRIPTION = (
     "Stateless HTTP API exposing Western astrology calculations "
-    "(natal charts, transits, synastry, current sky) computed via the Swiss "
+    "(natal charts, transits, synastry, composite charts, current sky) computed "
+    "via the Swiss "
     "Ephemeris. Consumed by an LLM client (Claude / ChatGPT) through Delegate, "
-    "which auto-generates MCP tools from this OpenAPI spec."
+    "which auto-generates MCP tools from this OpenAPI spec.\n\n"
+    f"Licensed under AGPL-3.0-or-later. Source: {SOURCE_URL}"
 )
 
-_PUBLIC_BASE_URL = os.environ.get(
-    "PUBLIC_BASE_URL",
-    "https://astro-api-production-8a8b.up.railway.app",
-).rstrip("/")
-_SERVERS = [{"url": _PUBLIC_BASE_URL, "description": "Production"}]
+LOCAL_BASE_URL = "http://127.0.0.1:8000"
+
+
+def resolve_base_url(env: Mapping[str, str] | None = None) -> str:
+    """Base URL this API advertises in its OpenAPI `servers` block.
+
+    Explicit PUBLIC_BASE_URL wins; otherwise fall back to the domain Railway
+    injects, so a deployment needs no manual configuration. Falls back to
+    localhost last so a clone never advertises someone else's deployment.
+    """
+    env = os.environ if env is None else env
+    explicit = env.get("PUBLIC_BASE_URL")
+    if explicit:
+        return explicit.rstrip("/")
+    railway_domain = env.get("RAILWAY_PUBLIC_DOMAIN")
+    if railway_domain:
+        return f"https://{railway_domain}".rstrip("/")
+    return LOCAL_BASE_URL
+
+
+_PUBLIC_BASE_URL = resolve_base_url()
+_SERVERS = [{"url": _PUBLIC_BASE_URL, "description": "Configured deployment"}]
 
 app = FastAPI(
     title="astro-api",
@@ -259,6 +283,32 @@ def post_synastry(
     )
     _surface_multiple_matches(response.subject_a.warnings, location_a)
     _surface_multiple_matches(response.subject_b.warnings, location_b)
+    return response
+
+
+@app.post(
+    "/v1/composite",
+    response_model=CompositeResponse,
+    dependencies=[Depends(require_api_key)],
+    operation_id="post_composite",
+    summary="Midpoint composite chart of two people (the relationship as one chart)",
+)
+def post_composite(
+    payload: SynastryRequest,
+    settings: SettingsDep,
+) -> CompositeResponse:
+    location_a = resolve_place(payload.subject_a.birth_place)
+    location_b = resolve_place(payload.subject_b.birth_place)
+    house_system = payload.house_system or settings.default_house_system
+    response = build_composite(
+        payload.subject_a,
+        _to_charts_location(location_a),
+        payload.subject_b,
+        _to_charts_location(location_b),
+        house_system,
+    )
+    _surface_multiple_matches(response.warnings, location_a)
+    _surface_multiple_matches(response.warnings, location_b)
     return response
 
 
